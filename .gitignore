@@ -1,0 +1,24 @@
+# Xcode служебные файлы сборки и логи
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+
+# Персональные настройки разработчика (история вкладок, открытые файлы, состояние окон)
+# Обязательно исключаем их, чтобы коммиты не конфликтовали сами с собой
+xcuserdata/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Архивы и профили подготовки (если появятся)
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+
+# Системные файлы macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
