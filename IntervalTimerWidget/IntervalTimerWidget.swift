@@ -8,7 +8,7 @@ struct IntervalLiveActivityWidget: Widget {
             // Интерфейс на ЭКРАНЕ БЛОКИРОВКИ
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Интервальный таймер")
+                    Text("Таймер")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.orange)
                     Text("До сигнала:")
