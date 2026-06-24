@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 import Combine
 import ActivityKit
+import UIKit
 
 class ReminderManager: ObservableObject {
     @Published var isActive: Bool = false
@@ -19,11 +20,12 @@ class ReminderManager: ObservableObject {
     private var currentActivity: Activity<TimerWidgetAttributes>? = nil
     private var lastUpdatedActivityDate: Date? = nil
     
-    // Стандартное локальное хранилище iOS
+    // Хранилище для фонового таймера
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    
     private let localStore = UserDefaults.standard
     
     init() {
-        // Как только менеджер создается, мы сразу читаем данные из памяти телефона
         loadSettingsFromLocalStorage()
     }
     
@@ -31,12 +33,10 @@ class ReminderManager: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
     
-    // Очистка всех доставленных уведомлений из шторки
     func clearDeliveredNotifications() {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
     
-    // 1. ФУНКЦИЯ СОХРАНЕНИЯ НАСТРОЕК В ПАМЯТЬ ТЕЛЕФОНА
     func saveSettingsToLocalStorage(start: Date, end: Date, interval: Int, type: NotificationType) {
         localStore.set(start.timeIntervalSince1970, forKey: "local_startTime")
         localStore.set(end.timeIntervalSince1970, forKey: "local_endTime")
@@ -49,7 +49,6 @@ class ReminderManager: ObservableObject {
         self.savedNotificationType = type
     }
     
-    // 2. ФУНКЦИЯ ЗАГРУЗКИ НАСТРОЕК ИЗ ПАМЯТИ
     func loadSettingsFromLocalStorage() {
         let startTimestamp = localStore.double(forKey: "local_startTime")
         let endTimestamp = localStore.double(forKey: "local_endTime")
@@ -134,9 +133,8 @@ class ReminderManager: ObservableObject {
         self.totalIntervalSeconds = Double(intervalMinutes * 60)
         self.isActive = true
         
-        // --- ИСПРАВЛЕННЫЕ СТРОКИ 140 И 141 ---
+        // Запуск Live Activity
         if let nextReminder = reminderTimes.first {
-            // Передаем строго expireDate в ContentState и пустые атрибуты
             let initialState = TimerWidgetAttributes.ContentState(expireDate: nextReminder)
             let attributes = TimerWidgetAttributes()
             let activityContent = ActivityContent(state: initialState, staleDate: nil)
@@ -161,26 +159,47 @@ class ReminderManager: ObservableObject {
         isActive = false
         endLiveActivity()
         self.lastUpdatedActivityDate = nil
+        
+        // Сбрасываем фоновую задачу, если она активна
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
     }
     
     private func startInternalTimer() {
+        // Запрашиваем у iOS фоновое время, чтобы таймер не умирал сразу после закрытия приложения
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "TimerExtension") { [weak self] in
+            self?.endBackgroundTaskIfNeeded()
+        }
+        
         updateCountdown()
-        internalTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        
+        // Используем RunLoop.main с режимом .common, чтобы таймер тикал стабильнее
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateCountdown()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        internalTimer = timer
     }
     
     private func updateCountdown() {
         let now = Date()
+        
+        // Фильтруем только те сигналы, которые будут в будущем
         let activeReminders = reminderTimes.filter { $0 > now }
         
         if let nextReminder = activeReminders.first {
             let diff = Int(nextReminder.timeIntervalSince(now))
-            DispatchQueue.main.async { self.secondsToNextReminder = diff }
             
-            // --- ИСПРАВЛЕННАЯ СТРОКА 185 (ОБНОВЛЕНИЕ ПРИ СМЕНЕ ИНТЕРВАЛА) ---
-            if currentActivity != nil && nextReminder != lastUpdatedActivityDate {
-                lastUpdatedActivityDate = nextReminder
+            DispatchQueue.main.async {
+                self.secondsToNextReminder = diff
+            }
+            
+            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если текущее время перешагнуло прошлый таймер,
+            // или до него осталось меньше секунды, принудительно обновляем Live Activity на следующую дату
+            if nextReminder != lastUpdatedActivityDate {
+                self.lastUpdatedActivityDate = nextReminder
                 
                 let updatedState = TimerWidgetAttributes.ContentState(expireDate: nextReminder)
                 let updatedContent = ActivityContent(state: updatedState, staleDate: nil)
@@ -190,8 +209,19 @@ class ReminderManager: ObservableObject {
                 }
             }
         } else {
-            DispatchQueue.main.async { self.secondsToNextReminder = nil }
+            // Если сигналов больше нет — завершаем работу
+            DispatchQueue.main.async {
+                self.secondsToNextReminder = nil
+            }
             endLiveActivity()
+            endBackgroundTaskIfNeeded()
+        }
+    }
+    
+    private func endBackgroundTaskIfNeeded() {
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
         }
     }
     
