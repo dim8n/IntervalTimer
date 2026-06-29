@@ -3,7 +3,7 @@ import ActivityKit
 
 struct TimerWidgetAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
-        // Та самая переменная из первой версии
-        var expireDate: Date
+        // Передаем массив всех запланированных интервалов вместо одной даты
+        var reminderTimes: [Date]
     }
 }

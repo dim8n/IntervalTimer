@@ -134,12 +134,11 @@ class ReminderManager: ObservableObject {
         self.isActive = true
         
         // Запуск Live Activity
-        if let nextReminder = reminderTimes.first {
-            let initialState = TimerWidgetAttributes.ContentState(expireDate: nextReminder)
+        if !reminderTimes.isEmpty {
+            // Передаем весь массив запланированных интервалов
+            let initialState = TimerWidgetAttributes.ContentState(reminderTimes: reminderTimes)
             let attributes = TimerWidgetAttributes()
             let activityContent = ActivityContent(state: initialState, staleDate: nil)
-            
-            self.lastUpdatedActivityDate = nextReminder
             
             DispatchQueue.main.async {
                 if let activity = try? Activity.request(attributes: attributes, content: activityContent) {
@@ -185,23 +184,18 @@ class ReminderManager: ObservableObject {
     
     private func updateCountdown() {
         let now = Date()
-        
-        // Фильтруем только те сигналы, которые будут в будущем
         let activeReminders = reminderTimes.filter { $0 > now }
         
         if let nextReminder = activeReminders.first {
             let diff = Int(nextReminder.timeIntervalSince(now))
+            DispatchQueue.main.async { self.secondsToNextReminder = diff }
             
-            DispatchQueue.main.async {
-                self.secondsToNextReminder = diff
-            }
-            
-            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если текущее время перешагнуло прошлый таймер,
-            // или до него осталось меньше секунды, принудительно обновляем Live Activity на следующую дату
-            if nextReminder != lastUpdatedActivityDate {
-                self.lastUpdatedActivityDate = nextReminder
+            // Если приложение открыто, мы можем сказать Live Activity обновиться (на случай изменений),
+            // передавая актуальный массив reminderTimes
+            if currentActivity != nil && nextReminder != lastUpdatedActivityDate {
+                lastUpdatedActivityDate = nextReminder
                 
-                let updatedState = TimerWidgetAttributes.ContentState(expireDate: nextReminder)
+                let updatedState = TimerWidgetAttributes.ContentState(reminderTimes: reminderTimes)
                 let updatedContent = ActivityContent(state: updatedState, staleDate: nil)
                 
                 Task {
@@ -209,12 +203,8 @@ class ReminderManager: ObservableObject {
                 }
             }
         } else {
-            // Если сигналов больше нет — завершаем работу
-            DispatchQueue.main.async {
-                self.secondsToNextReminder = nil
-            }
+            DispatchQueue.main.async { self.secondsToNextReminder = nil }
             endLiveActivity()
-            endBackgroundTaskIfNeeded()
         }
     }
     
